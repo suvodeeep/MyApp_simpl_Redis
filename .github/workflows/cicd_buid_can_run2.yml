@@ -61,12 +61,13 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         
-      - name: Upload scan results
-        uses: actions/upload-artifact@v4
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
         with:
-            name: codeql-analysis-results
-            path: codeql_analysis_results.json
-
+          category: "/language:go"
+          output: codeql-sarif-results
+          upload: false
+      
       - name: Run the Redis-like App container
         run: |
           CONTAINER_ID=$(docker run -d -p 6379:6379 simp_redis:latest)
@@ -137,6 +138,7 @@ jobs:
           name: test-results
           path: |
             snyk-container-results.json
+            codeql-sarif-results/*.sarif
             container-report.md
             
       - name: Cleanup Docker
