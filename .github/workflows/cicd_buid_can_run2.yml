@@ -1,4 +1,4 @@
-name: Build, Scan and Run Container
+name: Build, Scan and Run MyApp v2
 
 on:
   workflow_dispatch:
