@@ -1,0 +1,131 @@
+name: Build, Scan and Run Container
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+  pull-requests: read
+
+jobs:
+  build-scan-and-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24'
+          
+      - name: Verify Go installation
+        run: 'echo "Go is installed: $(go version)"'
+        
+      - name: Install Stripr (comment remover)
+        run: go install github.com/aosasona/stripr@latest
+
+      - name: Build Docker image
+        run: |
+          docker build -t simp_redis:latest -f simp_Redis/Dockerfile simp_Redis || docker build -t simp_redis:latest .
+          docker images | grep simp_redis
+        
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+        
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+        
+      - name: Authenticate with Snyk
+        run: snyk auth ${{ secrets.SNYK_TOKEN }}
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          
+      - name: Snyk Container Scan
+        run: snyk container test simp_redis:latest --json > snyk-container-results.json || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          
+
+      - name: Run the Redis-like App container
+        run: |
+          CONTAINER_ID=$(docker run -d -p 6379:6379 simp_redis:latest)
+          echo "Container started with ID: $CONTAINER_ID"
+          
+          
+          sleep 15
+          
+
+          echo "Checking the container status..."
+          docker ps -a
+          
+          if docker ps --filter "id=$CONTAINER_ID" --format "{{.ID}}"; then
+            echo "Container is running successfully"
+            docker logs $CONTAINER_ID
+          else
+            echo "Container failed to start or crashed"
+            docker logs $CONTAINER_ID
+            exit 1
+          fi
+
+      - name: Test the App for Redis-like functionality
+        run: |
+          nc -v -w 3 localhost 6379
+          echo "Response received:"
+          echo "$response"
+      
+          echo "Now Testing basic functionality & behaviors of the App..."
+          
+          # Testing the PING command
+          echo "Testing PING..."
+          PING_RESULT=$(echo "PING" | nc -v -w 3 localhost 6379)
+          echo "PING response: $PING_RESULT"
+      
+          # Testing the SET command
+          echo "Testing SET..."
+          SET_RESULT=$(echo "SET name naruto" | nc -v -w 3 localhost 6379)
+          echo "SET response: $SET_RESULT"
+      
+          # Testing the GET command
+          echo "Testing GET..."
+          GET_RESULT=$(echo "GET name" | nc -v -w 3 localhost 6379)
+          echo "GET response: $GET_RESULT"
+
+          # Simple verification - just check that we got responses
+          if [[ "$PING_RESULT" == *"+PONG"* ]] && [[ "$SET_RESULT" == *"+OK"* ]] && [[
+          "$GET_RESULT" == *"naruto"* ]]; then
+            echo "Functionality is working correctly!"
+          else
+            echo "Errors in functionality hence test failed"
+            echo "PING should contain 'PONG', got: $PING_RESULT"
+            echo "SET should contain 'OK', got: $SET_RESULT" 
+            echo "GET should contain 'naruto', got: $GET_RESULT"
+            exit 1
+          fi
+
+      - name: Generate container running report
+        run: |
+          echo "## Container Running Test Report" > container-report.md
+          echo "" >> container-report.md
+          echo "### Container Details" >> container-report.md
+          docker inspect simp_redis:latest >> container-report.md
+          echo "" >> container-report.md
+          
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            snyk-container-results.json
+            container-report.md
+            
+      - name: Cleanup Docker
+        if: always()
+        run: docker system prune -f
