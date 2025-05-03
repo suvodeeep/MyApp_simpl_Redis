@@ -1,0 +1,1 @@
+# MyApp_simpl_Redis
